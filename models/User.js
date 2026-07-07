@@ -43,6 +43,26 @@ const userSchema = new mongoose.Schema({
   },
   lastLogin: {
     type: Date
+  },
+  twoFactorEnabled: {
+    type: Boolean,
+    default: false
+  },
+  twoFactorSecret: {
+    type: String,
+    select: false
+  },
+  twoFactorPendingSecret: {
+    type: String,
+    select: false
+  },
+  passwordResetToken: {
+    type: String,
+    select: false
+  },
+  passwordResetExpires: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true
@@ -52,6 +72,10 @@ const userSchema = new mongoose.Schema({
 userSchema.set('toJSON', {
   transform: function(doc, ret) {
     delete ret.password;
+    delete ret.twoFactorSecret;
+    delete ret.twoFactorPendingSecret;
+    delete ret.passwordResetToken;
+    delete ret.passwordResetExpires;
     delete ret.__v;
     return ret;
   }
