@@ -1,15 +1,21 @@
-const mongoose = require('mongoose');
-const dotenv = require('dotenv');
-dotenv.config();
+const { createClient } = require("@supabase/supabase-js");
+require("dotenv").config();
 
-const connectDB = async () => {
-  try {
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log('MongoDB connected');
-  } catch (err) {
-    console.error('MongoDB connection error:', err.message);
-    process.exit(1);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+);
+
+async function testConnection() {
+  const { data, error } = await supabase.from("users").select("*");
+
+  if (error) {
+    console.log(error);
+  } else {
+    console.log("✅ Supabase Connected");
   }
-};
+}
 
-module.exports = connectDB;
+testConnection();
+
+module.exports = supabase;
