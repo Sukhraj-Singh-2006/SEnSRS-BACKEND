@@ -1,6 +1,6 @@
 // middleware/authMiddleware.js
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const jwt = require("jsonwebtoken");
+const supabase = require("../db");
 
 exports.protect = async (req, res, next) => {
   try {
@@ -12,13 +12,22 @@ exports.protect = async (req, res, next) => {
     }
 
     // 2) fallback to header
-    if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
+    if (
+      !token &&
+      req.headers.authorization &&
+      req.headers.authorization.startsWith("Bearer ")
+    ) {
+      token = req.headers.authorization.split(" ")[1];
     }
 
     if (!token) {
-      console.warn('protect: no token found. req.cookies=', req.cookies, 'authHeader=', req.headers.authorization?.slice?.(0,50));
-      return res.status(401).json({ message: 'Not authorized: token missing' });
+      console.warn(
+        "protect: no token found. req.cookies=",
+        req.cookies,
+        "authHeader=",
+        req.headers.authorization?.slice?.(0, 50),
+      );
+      return res.status(401).json({ message: "Not authorized: token missing" });
     }
 
     // verify token
@@ -26,22 +35,32 @@ exports.protect = async (req, res, next) => {
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
-      console.warn('protect: jwt.verify failed:', err && err.message);
+      console.warn("protect: jwt.verify failed:", err && err.message);
       // explicit reasons for easier debugging
-      if (err.name === 'TokenExpiredError') {
-        return res.status(401).json({ message: 'Not authorized: token expired' });
+      if (err.name === "TokenExpiredError") {
+        return res
+          .status(401)
+          .json({ message: "Not authorized: token expired" });
       }
-      return res.status(401).json({ message: 'Not authorized: token invalid' });
+      return res.status(401).json({ message: "Not authorized: token invalid" });
     }
 
     // Option: re-fetch user from DB to ensure user still exists and get fresh fields
-    if (process.env.PROTECT_REFETCH_USER === 'true') {
-      const user = await User.findById(decoded.id).select('-password');
-      if (!user) {
-        return res.status(401).json({ message: 'Not authorized: user no longer exists' });
+    if (process.env.PROTECT_REFETCH_USER === "true") {
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("id,name,email,role,state,is_active")
+        .eq("id", decoded.id)
+        .single();
+
+      if (error || !user) {
+        return res.status(401).json({
+          message: "Not authorized: user no longer exists",
+        });
       }
+
       req.user = {
-        id: user._id.toString(),
+        id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -58,19 +77,22 @@ exports.protect = async (req, res, next) => {
 
     next();
   } catch (err) {
-    console.error('protect middleware unexpected error:', err);
-    return res.status(500).json({ message: 'Server error' });
+    console.error("protect middleware unexpected error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
-exports.authorize = (...allowedRoles) => (req, res, next) => {
-  if (!req.user || !req.user.role) return res.status(401).json({ message: 'Not authenticated' });
+exports.authorize =
+  (...allowedRoles) =>
+  (req, res, next) => {
+    if (!req.user || !req.user.role)
+      return res.status(401).json({ message: "Not authenticated" });
 
-  const userRole = String(req.user.role).toLowerCase();
-  const normalizedAllowed = allowedRoles.map(r => String(r).toLowerCase());
+    const userRole = String(req.user.role).toLowerCase();
+    const normalizedAllowed = allowedRoles.map((r) => String(r).toLowerCase());
 
-  if (!normalizedAllowed.includes(userRole)) {
-    return res.status(403).json({ message: 'Forbidden: insufficient role' });
-  }
-  next();
-};
+    if (!normalizedAllowed.includes(userRole)) {
+      return res.status(403).json({ message: "Forbidden: insufficient role" });
+    }
+    next();
+  };

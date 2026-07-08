@@ -1,6 +1,6 @@
 const express = require('express');
 const dotenv = require('dotenv');
-const connectDB = require('./db');
+require('./db');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
@@ -42,9 +42,6 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json());
 app.use(cookieParser());
-
-// Connect DB
-connectDB();
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
