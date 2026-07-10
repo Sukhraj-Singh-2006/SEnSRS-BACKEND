@@ -1,6 +1,8 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const supabase = require("../db");
+const speakeasy = require("speakeasy");
+const QRCode = require("qrcode");
 const { DEFAULT_ROLE, VALID_ROLES } = require("../constants/roles");
 
 const signToken = (user) => {
@@ -91,21 +93,8 @@ exports.register = async (req, res) => {
     }
 
     // Generate JWT
-    const token = signToken(user);
-
-    // Set cookie
-    res.cookie("token", token, buildCookieOptions());
-
-    // Return response
     return res.status(201).json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        state: user.state,
-        isActive: user.is_active,
-      },
+      message: "Registration successful. Please login to continue.",
     });
   } catch (err) {
     console.error(err);
@@ -115,7 +104,6 @@ exports.register = async (req, res) => {
     });
   }
 };
-
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -154,21 +142,60 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Create JWT
-    const token = signToken(user);
+    // ===========================
+    // FIRST LOGIN (NO 2FA SETUP)
+    // ===========================
+    if (!user.two_factor_secret) {
+      let secret;
 
-    // Set cookie
-    res.cookie("token", token, buildCookieOptions());
+      // Reuse existing pending secret if available
+      if (user.two_factor_pending_secret) {
+        secret = {
+          base32: user.two_factor_pending_secret,
+          otpauth_url: speakeasy.otpauthURL({
+            secret: user.two_factor_pending_secret,
+            label: `SEnSRS (${user.email})`,
+            issuer: "SEnSRS",
+            encoding: "base32",
+          }),
+        };
+      } else {
+        // Generate new secret
+        secret = speakeasy.generateSecret({
+          name: `SEnSRS (${user.email})`,
+        });
 
-    return res.json({
-      user: {
-        id: user.id,
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({
+            two_factor_pending_secret: secret.base32,
+          })
+          .eq("id", user.id);
+
+        if (updateError) {
+          return res.status(500).json({
+            message: updateError.message,
+          });
+        }
+      }
+
+      const qrCode = await QRCode.toDataURL(secret.otpauth_url);
+
+      return res.json({
+        requires2FASetup: true,
+        userId: user.id,
         name: user.name,
-        email: user.email,
-        role: user.role,
-        state: user.state,
-        isActive: user.is_active,
-      },
+        qrCode,
+      });
+    }
+
+    // ===========================
+    // EXISTING USER
+    // ===========================
+    return res.json({
+      requires2FA: true,
+      userId: user.id,
+      name: user.name,
     });
   } catch (err) {
     console.error(err);
@@ -178,7 +205,6 @@ exports.login = async (req, res) => {
     });
   }
 };
-
 exports.logout = async (req, res) => {
   try {
     res.clearCookie("token", {
@@ -238,18 +264,155 @@ exports.resetPassword = async (req, res) => {
   res.json({ message: "Reset Password coming next" });
 };
 
-exports.setupTwoFactor = async (req, res) => {
-  res.json({ message: "Setup 2FA coming next" });
-};
+exports.completeTwoFactorSetup = async (req, res) => {
+  try {
+    const { userId, token } = req.body;
 
-exports.enableTwoFactor = async (req, res) => {
-  res.json({ message: "Enable 2FA coming next" });
-};
+    if (!userId || !token) {
+      return res.status(400).json({
+        message: "User ID and verification code are required",
+      });
+    }
 
-exports.disableTwoFactor = async (req, res) => {
-  res.json({ message: "Disable 2FA coming next" });
-};
+    // Find user
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single();
 
+    if (error || !user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (!user.two_factor_pending_secret) {
+      return res.status(400).json({
+        message: "No pending 2FA setup found",
+      });
+    }
+
+    // Verify Microsoft Authenticator code
+    const verified = speakeasy.totp.verify({
+      secret: user.two_factor_pending_secret,
+      encoding: "base32",
+      token,
+      window: 1,
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        message: "Invalid verification code",
+      });
+    }
+
+    // Save secret permanently
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({
+        two_factor_secret: user.two_factor_pending_secret,
+        two_factor_pending_secret: null,
+        two_factor_enabled: true,
+      })
+      .eq("id", user.id);
+
+    if (updateError) {
+      return res.status(500).json({
+        message: updateError.message,
+      });
+    }
+
+    // Create JWT
+    const jwtToken = signToken(user);
+
+    // Set cookie
+    res.cookie("token", jwtToken, buildCookieOptions());
+
+    return res.json({
+      message: "2FA setup completed successfully",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        state: user.state,
+        isActive: user.is_active,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      message: "Server Error",
+    });
+  }
+};
 exports.verifyTwoFactorLogin = async (req, res) => {
-  res.json({ message: "Verify 2FA coming next" });
+  try {
+    const { userId, token } = req.body;
+
+    if (!userId || !token) {
+      return res.status(400).json({
+        message: "User ID and verification code are required",
+      });
+    }
+
+    // Find user
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (!user.two_factor_secret) {
+      return res.status(400).json({
+        message: "Two-factor authentication is not configured",
+      });
+    }
+
+    // Verify TOTP
+    const verified = speakeasy.totp.verify({
+      secret: user.two_factor_secret,
+      encoding: "base32",
+      token,
+      window: 1,
+    });
+
+    if (!verified) {
+      return res.status(401).json({
+        message: "Invalid verification code",
+      });
+    }
+
+    // Create JWT
+    const jwtToken = signToken(user);
+
+    // Set Cookie
+    res.cookie("token", jwtToken, buildCookieOptions());
+
+    return res.json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        state: user.state,
+        isActive: user.is_active,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      message: "Server Error",
+    });
+  }
 };
