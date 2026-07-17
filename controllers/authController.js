@@ -205,6 +205,113 @@ exports.login = async (req, res) => {
     });
   }
 };
+exports.adminLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        message: "Email and password are required",
+      });
+    }
+
+    // Find user
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        message: error.message,
+      });
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        message: "Invalid credentials",
+      });
+    }
+
+    // Check password
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      return res.status(401).json({
+        message: "Invalid credentials",
+      });
+    }
+    // ✅ Only admin can login here
+    if (user.role !== "admin") {
+      return res.status(403).json({
+        message: "Access denied. Admins only.",
+      });
+    }
+
+    // ===========================
+    // FIRST LOGIN (NO 2FA SETUP)
+    // ===========================
+    if (!user.two_factor_secret) {
+      let secret;
+
+      // Reuse existing pending secret if available
+      if (user.two_factor_pending_secret) {
+        secret = {
+          base32: user.two_factor_pending_secret,
+          otpauth_url: speakeasy.otpauthURL({
+            secret: user.two_factor_pending_secret,
+            label: `SEnSRS (${user.email})`,
+            issuer: "SEnSRS",
+            encoding: "base32",
+          }),
+        };
+      } else {
+        // Generate new secret
+        secret = speakeasy.generateSecret({
+          name: `SEnSRS (${user.email})`,
+        });
+
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({
+            two_factor_pending_secret: secret.base32,
+          })
+          .eq("id", user.id);
+
+        if (updateError) {
+          return res.status(500).json({
+            message: updateError.message,
+          });
+        }
+      }
+
+      const qrCode = await QRCode.toDataURL(secret.otpauth_url);
+
+      return res.json({
+        requires2FASetup: true,
+        userId: user.id,
+        name: user.name,
+        qrCode,
+      });
+    }
+
+    // ===========================
+    // EXISTING USER
+    // ===========================
+    return res.json({
+      requires2FA: true,
+      userId: user.id,
+      name: user.name,
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      message: "Server Error",
+    });
+  }
+};
 exports.logout = async (req, res) => {
   try {
     res.clearCookie("token", {

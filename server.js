@@ -1,53 +1,107 @@
-const express = require('express');
-const dotenv = require('dotenv');
-require('./db');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
+const express = require("express");
+const dotenv = require("dotenv");
+const cors = require("cors");
+const cookieParser = require("cookie-parser");
 
 dotenv.config();
 
+require("./db");
+
+const adminRoutes = require("./routes/admin");
+const authRoutes = require("./routes/auth");
+
 const app = express();
 
+// Trust proxy (for production)
+app.set("trust proxy", 1);
 
-// If you're behind nginx/proxy and using secure cookies, trust proxy
-app.set('trust proxy', 1);
-
-// Allowed origins
+// ======================
+// CORS Configuration
+// ======================
 const whitelist = [
-  'http://localhost:3000',        // dev
-  'https://sensrs.com',           // frontend production
-  'https://alice.sensrs.com'      // api subdomain (if needed)
+  "http://localhost:3000",
+  "https://sensrs.com",
+  "https://alice.sensrs.com",
 ];
 
 const corsOptions = {
-  origin: function (origin, callback) {
-    // allow requests with no origin (mobile apps, curl, server-to-server)
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Postman, curl, mobile apps)
     if (!origin) return callback(null, true);
 
-    if (whitelist.indexOf(origin) !== -1) {
+    if (whitelist.includes(origin)) {
       return callback(null, true);
-    } else {
-      // reject other origins
-      return callback(new Error('CORS: Not allowed by CORS'));
     }
+
+    console.log("❌ Blocked CORS Origin:", origin);
+    callback(new Error("Not allowed by CORS"));
   },
+
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
+
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Accept",
+    "X-Requested-With",
+  ],
 };
 
-// Enable CORS using the options
+// ======================
+// Middleware
+// ======================
+
 app.use(cors(corsOptions));
-// Enable preflight for all routes
-app.options('*', cors(corsOptions));
+
+app.options("*", cors(corsOptions));
 
 app.use(express.json());
+
+app.use(express.urlencoded({ extended: true }));
+
 app.use(cookieParser());
 
+// Debug middleware (remove later)
+app.use((req, res, next) => {
+  console.log(
+    `${req.method} ${req.originalUrl} | Origin: ${req.headers.origin}`,
+  );
+  next();
+});
+
+// ======================
 // Routes
-app.use('/api/auth', require('./routes/auth'));
+// ======================
 
-app.get('/', (req, res) => res.send('SEnSRS backend running'));
+app.use("/api/auth", authRoutes);
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.use("/api/admin", adminRoutes);
+
+app.get("/", (req, res) => {
+  res.send("SEnSRS backend running");
+});
+
+// ======================
+// Error Handler
+// ======================
+
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+
+  res.status(500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
+});
+
+// ======================
+// Start Server
+// ======================
+
+const PORT = process.env.PORT || 5001;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server started on port ${PORT}`);
+});

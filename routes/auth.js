@@ -1,7 +1,7 @@
 // routes/auth.js
 const express = require("express");
 const router = express.Router();
-const authController = require('../controllers/authController');
+const authController = require("../controllers/authController");
 const { protect } = require("../middleware/authMiddleware");
 const { restrictTo } = require("../middleware/roleMiddleware");
 const { ROLES } = require("../constants/roles");
@@ -11,6 +11,7 @@ router.post("/register", authController.register);
 router.post("/login", authController.login);
 router.post("/login/2fa/setup", authController.completeTwoFactorSetup);
 router.post("/login/2fa", authController.verifyTwoFactorLogin);
+router.post("/admin-login", authController.adminLogin);
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
 

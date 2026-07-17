@@ -13,6 +13,7 @@ async function testConnection() {
     console.log(error);
   } else {
     console.log("✅ Supabase Connected");
+    console.log(data);
   }
 }
 
