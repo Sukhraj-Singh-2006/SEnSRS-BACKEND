@@ -438,6 +438,7 @@ exports.completeTwoFactorSetup = async (req, res) => {
 
     return res.json({
       message: "2FA setup completed successfully",
+      token: jwtToken,
       user: {
         id: user.id,
         name: user.name,
@@ -506,6 +507,7 @@ exports.verifyTwoFactorLogin = async (req, res) => {
 
     return res.json({
       message: "Login successful",
+      token: jwtToken,
       user: {
         id: user.id,
         name: user.name,
