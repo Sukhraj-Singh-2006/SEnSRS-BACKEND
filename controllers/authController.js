@@ -141,6 +141,11 @@ exports.login = async (req, res) => {
         message: "Invalid credentials",
       });
     }
+    if (user.is_active === false) {
+      return res.status(403).json({
+        message: "Your account is inactive. Please contact an administrator.",
+      });
+    }
 
     // ===========================
     // FIRST LOGIN (NO 2FA SETUP)
@@ -240,6 +245,11 @@ exports.adminLogin = async (req, res) => {
     if (!match) {
       return res.status(401).json({
         message: "Invalid credentials",
+      });
+    }
+    if (user.is_active === false) {
+      return res.status(403).json({
+        message: "Your account is inactive. Please contact an administrator.",
       });
     }
     // ✅ Only admin can login here
@@ -394,6 +404,12 @@ exports.completeTwoFactorSetup = async (req, res) => {
       });
     }
 
+    if (user.is_active === false) {
+      return res.status(403).json({
+        message: "Your account is inactive. Please contact an administrator.",
+      });
+    }
+
     if (!user.two_factor_pending_secret) {
       return res.status(400).json({
         message: "No pending 2FA setup found",
@@ -421,7 +437,6 @@ exports.completeTwoFactorSetup = async (req, res) => {
         two_factor_secret: user.two_factor_pending_secret,
         two_factor_pending_secret: null,
         two_factor_enabled: true,
-        is_active: true,
       })
       .eq("id", user.id);
 
@@ -446,7 +461,7 @@ exports.completeTwoFactorSetup = async (req, res) => {
         email: user.email,
         role: user.role,
         state: user.state,
-        isActive: true,
+        isActive: user.is_active,
       },
     });
   } catch (err) {
@@ -480,6 +495,12 @@ exports.verifyTwoFactorLogin = async (req, res) => {
       });
     }
 
+    if (user.is_active === false) {
+      return res.status(403).json({
+        message: "Your account is inactive. Please contact an administrator.",
+      });
+    }
+
     if (!user.two_factor_secret) {
       return res.status(400).json({
         message: "Two-factor authentication is not configured",
@@ -500,16 +521,6 @@ exports.verifyTwoFactorLogin = async (req, res) => {
       });
     }
 
-    const { error: activityError } = await supabase
-      .from("users")
-      .update({ is_active: true })
-      .eq("id", user.id);
-
-    if (activityError) {
-      return res.status(500).json({
-        message: activityError.message,
-      });
-    }
 
     // Create JWT
     const jwtToken = signToken(user);
@@ -526,7 +537,7 @@ exports.verifyTwoFactorLogin = async (req, res) => {
         email: user.email,
         role: user.role,
         state: user.state,
-        isActive: true,
+        isActive: user.is_active,
       },
     });
   } catch (err) {
