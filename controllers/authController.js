@@ -421,6 +421,7 @@ exports.completeTwoFactorSetup = async (req, res) => {
         two_factor_secret: user.two_factor_pending_secret,
         two_factor_pending_secret: null,
         two_factor_enabled: true,
+        is_active: true,
       })
       .eq("id", user.id);
 
@@ -445,7 +446,7 @@ exports.completeTwoFactorSetup = async (req, res) => {
         email: user.email,
         role: user.role,
         state: user.state,
-        isActive: user.is_active,
+        isActive: true,
       },
     });
   } catch (err) {
@@ -499,6 +500,17 @@ exports.verifyTwoFactorLogin = async (req, res) => {
       });
     }
 
+    const { error: activityError } = await supabase
+      .from("users")
+      .update({ is_active: true })
+      .eq("id", user.id);
+
+    if (activityError) {
+      return res.status(500).json({
+        message: activityError.message,
+      });
+    }
+
     // Create JWT
     const jwtToken = signToken(user);
 
@@ -514,7 +526,7 @@ exports.verifyTwoFactorLogin = async (req, res) => {
         email: user.email,
         role: user.role,
         state: user.state,
-        isActive: user.is_active,
+        isActive: true,
       },
     });
   } catch (err) {
