@@ -1,34 +1,44 @@
 const supabase = require("../db");
+const bcrypt = require("bcryptjs");
+const { v4: uuidv4 } = require("uuid");
 
 /**
  * GET ALL USERS
  */
 exports.getUsers = async (req, res) => {
-  console.log("GET /admin/users called");
+  try {
+    console.log("GET /admin/users called");
 
-  const { data, error } = await supabase.from("users").select("*");
+    const { data, error } = await supabase
+      .from("users")
+      .select("id,name,email,role,state,is_active,created_at,updated_at");
 
-  console.log("SUPABASE DATA:", data);
+    if (error) {
+      console.error("Failed to fetch users:", error.message);
 
-  if (error) {
-    console.log(error);
-    return res.status(500).json(error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch users",
+      });
+    }
+
+    return res.json({
+      success: true,
+      users: data,
+    });
+  } catch (err) {
+    console.error("Get users error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
-
-  return res.json({
-    success: true,
-    users: data,
-  });
 };
-/**
- * CREATE USER
- */
-/**
- * CREATE USER
- */
-const bcrypt = require("bcryptjs");
-const { v4: uuidv4 } = require("uuid");
 
+/**
+ * CREATE USER
+ */
 exports.createUser = async (req, res) => {
   try {
     const { name, email, password, role, state, is_active } = req.body;
@@ -48,21 +58,28 @@ exports.createUser = async (req, res) => {
           is_active,
         },
       ])
-      .select()
+      .select("id,name,email,role,state,is_active,created_at,updated_at")
       .single();
 
     if (error) {
-      return res.status(400).json(error);
+      console.error("Failed to create user:", error.message);
+
+      return res.status(400).json({
+        success: false,
+        message: "Failed to create user",
+      });
     }
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       user: data,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: err.message,
+    console.error("Create user error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
     });
   }
 };
@@ -71,42 +88,75 @@ exports.createUser = async (req, res) => {
  * UPDATE USER
  */
 exports.updateUser = async (req, res) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-  const { name, email, role, state, is_active } = req.body;
+    const { name, email, role, state, is_active } = req.body;
 
-  const { data, error } = await supabase
-    .from("users")
-    .update({
-      name,
-      email,
-      role,
-      state,
-      is_active,
-    })
-    .eq("id", id)
-    .select()
-    .single();
+    const { data, error } = await supabase
+      .from("users")
+      .update({
+        name,
+        email,
+        role,
+        state,
+        is_active,
+      })
+      .eq("id", id)
+      .select("id,name,email,role,state,is_active,created_at,updated_at")
+      .single();
 
-  if (error) return res.status(400).json(error);
+    if (error) {
+      console.error("Failed to update user:", error.message);
 
-  res.json({
-    success: true,
-    user: data,
-  });
+      return res.status(400).json({
+        success: false,
+        message: "Failed to update user",
+      });
+    }
+
+    return res.json({
+      success: true,
+      user: data,
+    });
+  } catch (err) {
+    console.error("Update user error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
 };
 
 /**
  * DELETE USER
  */
 exports.deleteUser = async (req, res) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-  const { error } = await supabase.from("users").delete().eq("id", id);
+    const { error } = await supabase.from("users").delete().eq("id", id);
 
-  if (error) return res.status(400).json(error);
+    if (error) {
+      console.error("Failed to delete user:", error.message);
 
-  res.json({
-    success: true,
-  });
+      return res.status(400).json({
+        success: false,
+        message: "Failed to delete user",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (err) {
+    console.error("Delete user error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
 };

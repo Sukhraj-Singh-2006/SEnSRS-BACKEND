@@ -1,4 +1,5 @@
 const { createClient } = require("@supabase/supabase-js");
+
 require("dotenv").config();
 
 const supabase = createClient(
@@ -7,13 +8,12 @@ const supabase = createClient(
 );
 
 async function testConnection() {
-  const { data, error } = await supabase.from("users").select("*");
+  const { error } = await supabase.from("users").select("id").limit(1);
 
   if (error) {
-    console.log(error);
+    console.error("❌ Supabase connection check failed:", error.message);
   } else {
     console.log("✅ Supabase Connected");
-    console.log(data);
   }
 }
 
