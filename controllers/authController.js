@@ -1,5 +1,6 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const supabase = require("../db");
 const speakeasy = require("speakeasy");
 const QRCode = require("qrcode");
@@ -374,11 +375,202 @@ exports.getDashboards = async (req, res) => {
 };
 
 exports.forgotPassword = async (req, res) => {
-  res.json({ message: "Forgot Password coming next" });
+  try {
+    const { email } = req.body;
+
+    // Validate email
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    // Normalize email
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Find user
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("id, email, name")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Forgot password lookup error:", error);
+
+      return res.status(500).json({
+        message: "Unable to process password reset request",
+      });
+    }
+
+    /*
+     * Do not reveal whether the email exists.
+     */
+    if (!user) {
+      return res.json({
+        message:
+          "If an account exists for this email, a password reset link has been sent.",
+      });
+    }
+
+    // Generate a secure random reset token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+
+    // Hash token before storing it in database
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
+
+    // Token expires after 15 minutes
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+    // Save hashed token and expiry
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({
+        password_reset_token: tokenHash,
+        password_reset_expires: expiresAt,
+      })
+      .eq("id", user.id);
+
+    if (updateError) {
+      console.error("Password reset token database error:", updateError);
+
+      return res.status(500).json({
+        message: "Unable to create password reset request",
+      });
+    }
+
+    // Frontend URL
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+
+    // Create reset URL
+    const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(
+      resetToken,
+    )}`;
+
+    /*
+     * DEVELOPMENT MODE
+     *
+     * For now we return the reset URL so we can test
+     * the complete reset flow.
+     *
+     * Later we will send this URL through email.
+     */
+    if (process.env.NODE_ENV !== "production") {
+      return res.json({
+        message: "Password reset link generated successfully.",
+        developmentResetUrl: resetUrl,
+      });
+    }
+
+    /*
+     * PRODUCTION
+     *
+     * Later this response will be accompanied by
+     * an actual email containing resetUrl.
+     */
+    return res.json({
+      message:
+        "If an account exists for this email, a password reset link has been sent.",
+    });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+
+    return res.status(500).json({
+      message: "Server Error",
+    });
+  }
 };
 
 exports.resetPassword = async (req, res) => {
-  res.json({ message: "Reset Password coming next" });
+  try {
+    const { token, password } = req.body;
+
+    // Validate input
+    if (!token || !password) {
+      return res.status(400).json({
+        message: "Reset token and new password are required",
+      });
+    }
+
+    // Basic password validation
+    if (password.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters long",
+      });
+    }
+
+    // Hash token received from reset URL
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    // Find user using hashed token
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("id, email, name, password_reset_token, password_reset_expires")
+      .eq("password_reset_token", tokenHash)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Reset password lookup error:", error);
+
+      return res.status(500).json({
+        message: "Unable to process password reset",
+      });
+    }
+
+    // Invalid token
+    if (!user) {
+      return res.status(400).json({
+        message: "Invalid or expired password reset link",
+      });
+    }
+
+    // Check token expiry
+    if (
+      !user.password_reset_expires ||
+      new Date(user.password_reset_expires) < new Date()
+    ) {
+      return res.status(400).json({
+        message: "Invalid or expired password reset link",
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Update password and invalidate reset token
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({
+        password: hashedPassword,
+
+        // Token can only be used once
+        password_reset_token: null,
+        password_reset_expires: null,
+      })
+      .eq("id", user.id);
+
+    if (updateError) {
+      console.error("Password update error:", updateError);
+
+      return res.status(500).json({
+        message: "Unable to reset password",
+      });
+    }
+
+    return res.json({
+      message:
+        "Password reset successfully. You can now log in with your new password.",
+    });
+  } catch (err) {
+    console.error("Reset password error:", err);
+
+    return res.status(500).json({
+      message: "Server Error",
+    });
+  }
 };
 
 exports.completeTwoFactorSetup = async (req, res) => {
@@ -520,7 +712,6 @@ exports.verifyTwoFactorLogin = async (req, res) => {
         message: "Invalid verification code",
       });
     }
-
 
     // Create JWT
     const jwtToken = signToken(user);
