@@ -29,7 +29,86 @@ function buildCookieOptions() {
     path: "/",
   };
 }
+// ===========================
+// LOGIN BRUTE-FORCE PROTECTION
+// ===========================
 
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
+
+// Check whether the account is currently locked
+function isAccountLocked(user) {
+  if (!user.locked_until) {
+    return false;
+  }
+
+  const lockedUntil = new Date(user.locked_until);
+  const now = new Date();
+
+  return lockedUntil > now;
+}
+
+// Record a failed login attempt
+async function recordFailedLogin(user) {
+  const attempts = (user.failed_login_attempts || 0) + 1;
+
+  // Lock account after 5 failed attempts
+  if (attempts >= MAX_LOGIN_ATTEMPTS) {
+    const lockedUntil = new Date(
+      Date.now() + LOCKOUT_MINUTES * 60 * 1000,
+    ).toISOString();
+
+    const { error } = await supabase
+      .from("users")
+      .update({
+        failed_login_attempts: attempts,
+        locked_until: lockedUntil,
+      })
+      .eq("id", user.id);
+
+    if (error) {
+      console.error("Failed to lock account:", error);
+    }
+
+    return {
+      locked: true,
+      attempts,
+      lockedUntil,
+    };
+  }
+
+  // Account not locked yet
+  const { error } = await supabase
+    .from("users")
+    .update({
+      failed_login_attempts: attempts,
+    })
+    .eq("id", user.id);
+
+  if (error) {
+    console.error("Failed to update failed login attempts:", error);
+  }
+
+  return {
+    locked: false,
+    attempts,
+  };
+}
+
+// Reset login attempts after successful password verification
+async function resetLoginAttempts(userId) {
+  const { error } = await supabase
+    .from("users")
+    .update({
+      failed_login_attempts: 0,
+      locked_until: null,
+    })
+    .eq("id", userId);
+
+  if (error) {
+    console.error("Failed to reset login attempts:", error);
+  }
+}
 // ---------- TEMPORARY ----------
 
 exports.register = async (req, res) => {
@@ -142,6 +221,53 @@ exports.login = async (req, res) => {
         message: "Invalid credentials",
       });
     }
+    // ===========================
+    // CHECK ACCOUNT LOCK
+    // ===========================
+
+    if (isAccountLocked(user)) {
+      const lockedUntil = new Date(user.locked_until);
+
+      const remainingMinutes = Math.ceil(
+        (lockedUntil.getTime() - Date.now()) / 60000,
+      );
+
+      return res.status(429).json({
+        message: `Too many failed login attempts. Please try again in ${remainingMinutes} minute(s).`,
+      });
+    }
+
+    // ===========================
+    // CHECK PASSWORD
+    // ===========================
+
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      const result = await recordFailedLogin(user);
+
+      if (result.locked) {
+        return res.status(429).json({
+          message:
+            "Too many failed login attempts. Your account has been temporarily locked for 15 minutes.",
+        });
+      }
+
+      const remainingAttempts = MAX_LOGIN_ATTEMPTS - result.attempts;
+
+      return res.status(401).json({
+        message: "Invalid credentials",
+        remainingAttempts,
+      });
+    }
+
+    // ===========================
+    // PASSWORD CORRECT
+    // ===========================
+
+    // Reset failed login attempts
+    await resetLoginAttempts(user.id);
+
     if (user.is_active === false) {
       return res.status(403).json({
         message: "Your account is inactive. Please contact an administrator.",
