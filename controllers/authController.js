@@ -33,8 +33,8 @@ function buildCookieOptions() {
 // LOGIN BRUTE-FORCE PROTECTION
 // ===========================
 
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 15;
+const MAX_LOGIN_ATTEMPTS = 3;
+const LOCKOUT_MINUTES = 10;
 
 // Check whether the account is currently locked
 function isAccountLocked(user) {
