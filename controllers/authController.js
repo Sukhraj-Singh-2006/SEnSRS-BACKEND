@@ -413,10 +413,10 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    // Generate a secure random reset token
+    // Generate secure random reset token
     const resetToken = crypto.randomBytes(32).toString("hex");
 
-    // Hash token before storing it in database
+    // Hash token before storing it
     const tokenHash = crypto
       .createHash("sha256")
       .update(resetToken)
@@ -450,27 +450,123 @@ exports.forgotPassword = async (req, res) => {
       resetToken,
     )}`;
 
-    /*
-     * DEVELOPMENT MODE
-     *
-     * For now we return the reset URL so we can test
-     * the complete reset flow.
-     *
-     * Later we will send this URL through email.
-     */
-    if (process.env.NODE_ENV !== "production") {
-      return res.json({
-        message: "Password reset link generated successfully.",
-        developmentResetUrl: resetUrl,
+    // ==============================
+    // SEND EMAIL USING BREVO
+    // ==============================
+
+    const brevoApiKey = process.env.BREVO_API_KEY;
+    const senderEmail = process.env.BREVO_SENDER_EMAIL;
+    const senderName = process.env.BREVO_SENDER_NAME || "SEnSRS";
+
+    if (!brevoApiKey || !senderEmail) {
+      console.error("Brevo configuration is missing.");
+
+      return res.status(500).json({
+        message: "Email service is not configured",
       });
     }
 
-    /*
-     * PRODUCTION
-     *
-     * Later this response will be accompanied by
-     * an actual email containing resetUrl.
-     */
+    const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "api-key": brevoApiKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: {
+          name: senderName,
+          email: senderEmail,
+        },
+
+        to: [
+          {
+            email: user.email,
+            name: user.name || user.email,
+          },
+        ],
+
+        subject: "SEnSRS Password Reset",
+
+        htmlContent: `
+            <!DOCTYPE html>
+            <html>
+              <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <h2 style="color: #1f5d48;">
+                  Reset your SEnSRS password
+                </h2>
+
+                <p>Hello ${user.name || "User"},</p>
+
+                <p>
+                  We received a request to reset your SEnSRS account password.
+                </p>
+
+                <p>
+                  Click the button below to choose a new password:
+                </p>
+
+                <p>
+                  <a
+                    href="${resetUrl}"
+                    style="
+                      display: inline-block;
+                      padding: 12px 24px;
+                      background-color: #28a745;
+                      color: white;
+                      text-decoration: none;
+                      border-radius: 6px;
+                      font-weight: bold;
+                    "
+                  >
+                    Reset Password
+                  </a>
+                </p>
+
+                <p>
+                  This link will expire in <strong>15 minutes</strong>.
+                </p>
+
+                <p>
+                  If you did not request a password reset, you can safely
+                  ignore this email.
+                </p>
+
+                <p>
+                  Regards,<br />
+                  SEnSRS Team
+                </p>
+              </body>
+            </html>
+          `,
+      }),
+    });
+
+    if (!brevoResponse.ok) {
+      const brevoError = await brevoResponse.text();
+
+      console.error(
+        "Brevo email sending failed:",
+        brevoResponse.status,
+        brevoError,
+      );
+
+      return res.status(500).json({
+        message: "Unable to send password reset email",
+      });
+    }
+
+    const brevoResult = await brevoResponse.json();
+
+    console.log(
+      "Password reset email sent successfully:",
+      brevoResult.messageId || "accepted",
+    );
+
+    // ==============================
+    // SUCCESS
+    // ==============================
+
     return res.json({
       message:
         "If an account exists for this email, a password reset link has been sent.",
